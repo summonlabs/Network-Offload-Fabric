@@ -1,0 +1,14 @@
+@PACKAGE_INIT@
+
+# Network Offload Fabric -- CMake package configuration.
+#
+# Consumers use:
+#   find_package(nof 1.0 REQUIRED)
+#   target_link_libraries(app PRIVATE nof::nof)
+#
+# Only installed headers and libraries are referenced; no build-tree paths and
+# no repository warning flags are propagated.
+
+include("${CMAKE_CURRENT_LIST_DIR}/nof-targets.cmake")
+
+check_required_components(nof)

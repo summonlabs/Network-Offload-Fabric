@@ -1,0 +1,45 @@
+# Build trees
+/build/
+/build-*/
+/out/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+install/
+_stage/
+*.vcxproj*
+*.sln
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.lib
+*.exp
+*.a
+*.so
+*.dylib
+compile_commands.json
+
+# Runtime artifacts produced by tests, tooling, and validation runs
+/.nof-store/
+*.nofjournal
+*.nofsnapshot
+*.nofjournal.tmp
+*.nofsnapshot.tmp
+*.nofrecovery
+*.log
+core
+core.*
+
+# Editor / OS
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+*~

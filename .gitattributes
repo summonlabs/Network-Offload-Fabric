@@ -1,0 +1,12 @@
+# Canonical line endings so a fresh clone builds identically everywhere.
+* text=auto
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.cmake text eol=lf
+*.in text eol=lf
+CMakeLists.txt text eol=lf
+LICENSE text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
