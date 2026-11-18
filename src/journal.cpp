@@ -781,27 +781,42 @@ Status JournalStore::compact(std::span<const std::byte> snapshot, std::uint64_t 
     return Error(ReasonCode::InvalidConfiguration, "store identity is not canonical");
   }
   impl.journal.close();
+  // A failure below returned with the journal closed while the store stayed
+  // open, so the next record was written to a closed (null) stream, which the
+  // C runtime treats as an invalid parameter and ends the process. When the
+  // rewrite fails, the untouched original journal is reopened and the store
+  // stays usable; if no journal can be opened, the store is marked closed.
+  const auto keep_journal = [&impl](const Error& error) -> Status {
+    auto original = detail::open_file(impl.path, true, true);
+    if (original) {
+      impl.journal = original.take();
+    } else {
+      impl.closed = true;
+    }
+    return error;
+  };
   {
     auto tmp = detail::open_file(impl.journal_tmp_path, true, false, true);
     if (!tmp) {
-      return tmp.error();
+      return keep_journal(tmp.error());
     }
     Status status = detail::write_all(tmp.value().file, header);
     if (!status) {
-      return status.error();
+      return keep_journal(status.error());
     }
     status = detail::flush_and_sync(tmp.value().file, impl.options.durable_commit);
     if (!status) {
-      return status.error();
+      return keep_journal(status.error());
     }
     tmp.value().close();
     status = detail::atomic_replace(impl.journal_tmp_path, impl.path);
     if (!status) {
-      return status.error();
+      return keep_journal(status.error());
     }
   }
   auto reopened = detail::open_file(impl.path, true, true);
   if (!reopened) {
+    impl.closed = true;
     return reopened.error();
   }
   impl.journal = reopened.take();

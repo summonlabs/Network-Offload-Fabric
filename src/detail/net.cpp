@@ -89,10 +89,19 @@ Status Socket::set_reuse_address() {
     return socket_error("set_reuse_address");
   }
   int one = 1;
+#if defined(_WIN32)
+  // SO_REUSEADDR on Windows lets a second socket bind a port that is still
+  // listening; exclusive use makes that second bind fail instead.
+  if (setsockopt(to_native(handle_), SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+                 reinterpret_cast<const char*>(&one), sizeof(one)) != 0) {
+    return socket_error("setsockopt(SO_EXCLUSIVEADDRUSE)");
+  }
+#else
   if (setsockopt(to_native(handle_), SOL_SOCKET, SO_REUSEADDR,
                  reinterpret_cast<const char*>(&one), sizeof(one)) != 0) {
     return socket_error("setsockopt(SO_REUSEADDR)");
   }
+#endif
   return ok_status();
 }
 

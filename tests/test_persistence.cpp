@@ -1,7 +1,14 @@
 #include "framework.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <system_error>
+#include <thread>
 #include <vector>
 
 #include "nof/journal.hpp"
@@ -13,6 +20,26 @@ using namespace nof;
 namespace {
 
 std::string journal_path(const support::Fixture& fixture) { return fixture.path; }
+
+#if defined(_WIN32)
+void ignore_invalid_parameter(const wchar_t*, const wchar_t*, const wchar_t*, unsigned int,
+                              std::uintptr_t) {}
+
+// A store left writing to a closed journal stream passes a null stream to the
+// C runtime, which treats it as an invalid parameter and ends the process.
+// While a case runs, this guard turns that into a failed write, so the case
+// fails instead of ending the whole run.
+struct InvalidParameterGuard {
+  _invalid_parameter_handler previous =
+      _set_thread_local_invalid_parameter_handler(&ignore_invalid_parameter);
+  InvalidParameterGuard() = default;
+  InvalidParameterGuard(const InvalidParameterGuard&) = delete;
+  InvalidParameterGuard& operator=(const InvalidParameterGuard&) = delete;
+  ~InvalidParameterGuard() { _set_thread_local_invalid_parameter_handler(previous); }
+};
+#else
+struct InvalidParameterGuard {};
+#endif
 
 }  // namespace
 
@@ -273,6 +300,61 @@ NOF_TEST(persistence, journal_growth_is_bounded_by_compaction) {
   NOF_CHECK(reopened.verify_invariants().clean);
   NOF_CHECK(!(digest == Digest::zero()));
   NOF_CHECK_OK(reopened.shutdown());
+}
+
+NOF_TEST(persistence, compaction_waits_for_a_reader_of_the_journal) {
+  const InvalidParameterGuard guard;
+  support::Fixture fixture("persist-compact-reader");
+  const auto applied = fixture.apply("req-compact-reader");
+  NOF_CHECK_OK(applied);
+  bool reader_opened = false;
+  bool compacted = false;
+  {
+    // Tooling or a verifier inspecting the store, which the store opens its
+    // files shared for, holds the journal open while a compaction replaces it,
+    // and closes it shortly after.
+    std::ifstream reader(journal_path(fixture), std::ios::binary);
+    reader_opened = reader.is_open();
+    std::thread compactor([&fixture, &compacted] { compacted = fixture.ref().compact().ok(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    reader.close();
+    compactor.join();
+  }
+  NOF_CHECK(reader_opened);
+  // The replacement waits for the reader instead of failing the compaction.
+  NOF_CHECK(compacted);
+  if (compacted && applied.ok()) {
+    NOF_CHECK_OK(fixture.effect(applied.value(), EffectOutcome::Applied, "eff-compact-reader"));
+  }
+}
+
+NOF_TEST(persistence, a_failed_compaction_keeps_the_journal_writable) {
+  const InvalidParameterGuard guard;
+  support::Fixture fixture("persist-compact-failure");
+  const auto applied = fixture.apply("req-compact-failure");
+  NOF_CHECK_OK(applied);
+  // A directory where the rewritten journal is staged makes the rewrite fail
+  // after the store has closed its journal for the replacement.
+  const std::string staging = journal_path(fixture) + ".tmp";
+  std::error_code error;
+  std::filesystem::create_directory(staging, error);
+  NOF_CHECK(!error);
+  NOF_CHECK(!fixture.ref().compact().ok());
+  std::filesystem::remove(staging, error);
+  if (!applied.ok()) {
+    return;
+  }
+  // The original journal is untouched and stays the store's journal: the next
+  // record is written to it, and it survives a restart.
+  NOF_CHECK_OK(fixture.effect(applied.value(), EffectOutcome::Applied, "eff-compact-failure"));
+  NOF_CHECK_OK(fixture.ref().shutdown());
+  NOF_CHECK_OK(fixture.reopen());
+  NOF_CHECK(fixture.ref().verify_invariants().clean);
+  const auto record = fixture.ref().get_assignment(applied.value().id);
+  NOF_CHECK_OK(record);
+  if (record.ok()) {
+    NOF_CHECK(!record.value().effects.empty());
+  }
 }
 
 NOF_TEST(persistence, crash_boundaries_are_observed_and_consistent) {

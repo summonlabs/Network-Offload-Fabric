@@ -177,10 +177,26 @@ Status truncate_to(std::FILE* file, std::uint64_t size) {
 
 Status atomic_replace(const std::string& source, const std::string& target) {
 #if defined(_WIN32)
-  if (MoveFileExA(source.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING) == 0) {
-    return Error(ReasonCode::StoreUnavailable, "atomic replace failed for " + target);
+  // While a reader has the target open (tooling or a verifier inspecting the
+  // store, an antivirus or indexing scan) the replace fails until the reader
+  // closes the file, so it is retried for a bounded time (about 2 s). A
+  // directory in the way is not transient and fails at once.
+  for (int attempt = 0;; ++attempt) {
+    if (MoveFileExA(source.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING) != 0) {
+      return ok_status();
+    }
+    const DWORD error = GetLastError();
+    const DWORD attributes = GetFileAttributesA(target.c_str());
+    const bool directory =
+        attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    const bool transient = (error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION ||
+                            error == ERROR_LOCK_VIOLATION) &&
+                           !directory;
+    if (!transient || attempt >= 100) {
+      return Error(ReasonCode::StoreUnavailable, "atomic replace failed for " + target);
+    }
+    Sleep(20);
   }
-  return ok_status();
 #else
   if (std::rename(source.c_str(), target.c_str()) != 0) {
     return Error(ReasonCode::StoreUnavailable, "atomic replace failed for " + target);

@@ -460,3 +460,23 @@ NOF_TEST(process, hard_kill_is_recoverable) {
   NOF_CHECK(true);
 #endif
 }
+
+NOF_TEST(process, a_second_listener_cannot_take_a_listening_port) {
+  const auto started = detail::net_init();
+  NOF_CHECK(started.ok());
+  if (!started.ok()) {
+    return;
+  }
+  {
+    auto first = detail::listen_tcp("127.0.0.1", 0);
+    NOF_CHECK_OK(first);
+    if (first.ok()) {
+      NOF_CHECK(first.value().port != 0);
+      auto second = detail::listen_tcp("127.0.0.1", first.value().port);
+      // Two fabrics must never share one listening port: the second bind fails.
+      NOF_CHECK(!second.ok());
+    }
+  }
+  // The listeners are closed before the network layer is released.
+  detail::net_shutdown();
+}

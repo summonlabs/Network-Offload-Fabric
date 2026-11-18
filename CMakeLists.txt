@@ -45,8 +45,10 @@ endfunction()
 function(nof_apply_asan target)
   if(NOF_ENABLE_ASAN)
     if(MSVC)
-      target_compile_options(${target} PRIVATE /fsanitize=address)
-      target_link_options(${target} PRIVATE /fsanitize=address)
+      # Debug information is required: without it MSVC warns C5072 for every
+      # source, which NOF_WARNINGS_AS_ERRORS turns into an error.
+      target_compile_options(${target} PRIVATE /fsanitize=address /Zi)
+      target_link_options(${target} PRIVATE /DEBUG /INCREMENTAL:NO)
     else()
       target_compile_options(${target} PRIVATE -fsanitize=address -fno-omit-frame-pointer)
       target_link_options(${target} PRIVATE -fsanitize=address)
